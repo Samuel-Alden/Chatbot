@@ -1,0 +1,11 @@
+node_modules/
+data/
+auth_info/
+tmp/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+node_modules/
+.env
