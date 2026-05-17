@@ -250,7 +250,7 @@ async function startBot() {
         browser: ['Riwoo Bot', 'Chrome', '120.0.0']
     })
 
-    if (!sock.creds.registered) {
+    if (!sock.creds?.registered) {
     const phoneNumber = process.env.OWNER_NUMBER || config.ownerNumber
 
     setTimeout(async () => {
