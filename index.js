@@ -1,5 +1,6 @@
 const { Boom } = require('@hapi/boom')
 const pino = require('pino')
+const qrcode = require('qrcode-terminal')
 const fs = require('fs')
 const path = require('path')
 const messageHandler = require('./src/handlers/messageHandler')
@@ -245,30 +246,21 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: false,
-        syncFullHistory: false,
+        printQRInTerminal: true,
         logger: pino({ level: process.env.LOG_LEVEL || 'warn' }),
         browser: ['Riwoo Bot', 'Chrome', '120.0.0']
     })
-
-    if (!sock.creds?.registered) {
-    const phoneNumber = 6287896290099
-
-    setTimeout(async () => {
-        try {
-            const code = await sock.requestPairingCode(phoneNumber)
-            console.log(`\n📱 Your pairing code: ${code}\n`)
-        } catch (err) {
-            console.error('Failed to get pairing code:', err)
-        }
-    }, 3000)
-}
 
     alarm.setSock(sock)
     reminder.setSock(sock)
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update
+
+        if (qr) {
+            console.log('📱 Scan this QR code with your WhatsApp:')
+            qrcode.generate(qr, { small: true })
+        }
 
         if (connection === 'close') {
             const err = lastDisconnect?.error
