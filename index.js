@@ -246,9 +246,10 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: true,
         logger: pino({ level: process.env.LOG_LEVEL || 'warn' }),
-        browser: ['Riwoo Bot', 'Chrome', '120.0.0']
+        browser: ['Riwoo Bot', 'Chrome', '120.0.0'],
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 10000
     })
 
     alarm.setSock(sock)
