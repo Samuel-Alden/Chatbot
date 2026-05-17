@@ -246,6 +246,7 @@ async function startBot() {
         version,
         auth: state,
         printQRInTerminal: false,
+        syncFullHistory: false,
         logger: pino({ level: process.env.LOG_LEVEL || 'warn' }),
         browser: ['Riwoo Bot', 'Chrome', '120.0.0']
     })
