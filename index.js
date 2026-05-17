@@ -251,7 +251,7 @@ async function startBot() {
     })
 
     if (!sock.creds?.registered) {
-    const phoneNumber = process.env.OWNER_NUMBER
+    const phoneNumber = 6287896290099
 
     setTimeout(async () => {
         try {
