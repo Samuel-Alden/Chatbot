@@ -1,4 +1,5 @@
 const { isAdmin, isBotAdmin, getMentions, toJID } = require('../utils/helper')
+const { phoneOf, phonesOf } = require('../utils/jids')
 const db = require('../utils/db')
 
 // Persistent data
@@ -12,7 +13,37 @@ function getGroupSettings(groupId) {
     return groupSettings[groupId] || {}
 }
 
+const WARN_MAX = 3
+
+// Increment a warning for `targetJid` in `groupId`. If they hit WARN_MAX,
+// the bot tries to kick (best-effort — needs bot to be admin) and resets
+// the count. Returns { count, max, kicked }.
+async function addWarning(sock, groupId, targetJid) {
+    if (!warnings[groupId]) warnings[groupId] = {}
+    warnings[groupId][targetJid] = (warnings[groupId][targetJid] || 0) + 1
+    db.save('warnings', warnings)
+
+    const count = warnings[groupId][targetJid]
+    let kicked = false
+
+    if (count >= WARN_MAX) {
+        try {
+            if (await isBotAdmin(sock, groupId)) {
+                await sock.groupParticipantsUpdate(groupId, [targetJid], 'remove')
+                kicked = true
+            }
+        } catch (err) {
+            console.error('[addWarning] kick failed:', err.message)
+        }
+        warnings[groupId][targetJid] = 0
+        db.save('warnings', warnings)
+    }
+
+    return { count, max: WARN_MAX, kicked }
+}
+
 module.exports = {
+    addWarning,
 
     kick: async ({ sock, from, msg, isGroup, sender }) => {
         if (!isGroup) return sock.sendMessage(from, { text: '❌ This command is for groups only!' }, { quoted: msg })
@@ -89,7 +120,8 @@ module.exports = {
         if (!await isAdmin(sock, from, sender)) return sock.sendMessage(from, { text: '❌ You must be an admin!' }, { quoted: msg })
 
         const metadata = await sock.groupMetadata(from)
-        const members = metadata.participants.map(p => p.id)
+        // Prefer p.phoneNumber when baileys has resolved the LID, else fall through.
+        const members = metadata.participants.map(p => p.phoneNumber || p.id)
         const mentions = members.map(m => `@${m.split('@')[0]}`).join(' ')
 
         await sock.sendMessage(from, {
@@ -102,7 +134,10 @@ module.exports = {
         if (!isGroup) return sock.sendMessage(from, { text: '❌ This command is for groups only!' }, { quoted: msg })
 
         const metadata = await sock.groupMetadata(from)
-        const admins = metadata.participants.filter(p => p.admin).map(p => `@${p.id.split('@')[0]}`).join('\n  ')
+        const admins = metadata.participants
+            .filter(p => p.admin)
+            .map(p => `@${(p.phoneNumber || p.id).split('@')[0]}`)
+            .join('\n  ')
         const totalMembers = metadata.participants.length
         const totalAdmins = metadata.participants.filter(p => p.admin).length
         const createdAt = new Date(metadata.creation * 1000).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -199,26 +234,18 @@ ${metadata.desc || 'No description'}
         if (!mentions.length) return sock.sendMessage(from, { text: '❌ Tag the person you want to warn!\nExample: *!warn @user*' }, { quoted: msg })
 
         const target = mentions[0]
-        if (!warnings[from]) warnings[from] = {}
-        if (!warnings[from][target]) warnings[from][target] = 0
-        warnings[from][target]++
-        db.save('warnings', warnings)
+        const result = await addWarning(sock, from, target)
+        const pn = await phoneOf(sock, target, from)
 
-        const count = warnings[from][target]
-        const max = 3
-
-        if (count >= max) {
+        if (result.kicked) {
             await sock.sendMessage(from, {
-                text: `⚠️ @${target.split('@')[0]} has reached *${max} warnings* and has been kicked!`,
-                mentions: [target]
+                text: `⚠️ @${pn.split('@')[0]} has reached *${result.max} warnings* and has been kicked!`,
+                mentions: [pn]
             }, { quoted: msg })
-            await sock.groupParticipantsUpdate(from, [target], 'remove')
-            warnings[from][target] = 0
-            db.save('warnings', warnings)
         } else {
             await sock.sendMessage(from, {
-                text: `⚠️ Warning *${count}/${max}* for @${target.split('@')[0]}!\nNext warning will result in a kick.`,
-                mentions: [target]
+                text: `⚠️ Warning *${result.count}/${result.max}* for @${pn.split('@')[0]}!\nNext warning will result in a kick.`,
+                mentions: [pn]
             }, { quoted: msg })
         }
     },
@@ -233,10 +260,11 @@ ${metadata.desc || 'No description'}
         const target = mentions[0]
         if (warnings[from]) warnings[from][target] = 0
         db.save('warnings', warnings)
+        const pn = await phoneOf(sock, target, from)
 
         await sock.sendMessage(from, {
-            text: `✅ Warnings reset for @${target.split('@')[0]}!`,
-            mentions: [target]
+            text: `✅ Warnings reset for @${pn.split('@')[0]}!`,
+            mentions: [pn]
         }, { quoted: msg })
     },
 
@@ -248,12 +276,12 @@ ${metadata.desc || 'No description'}
 
         if (!entries.length) return sock.sendMessage(from, { text: '✅ No warned members in this group!' }, { quoted: msg })
 
-        const list = entries.map(([jid, count]) => `@${jid.split('@')[0]} — ${count}/3 warnings`).join('\n')
-        const mentions = entries.map(([jid]) => jid)
+        const pns = await phonesOf(sock, entries.map(([jid]) => jid), from)
+        const list = entries.map(([, count], i) => `@${pns[i].split('@')[0]} — ${count}/3 warnings`).join('\n')
 
         await sock.sendMessage(from, {
             text: `⚠️ *Warned Members:*\n\n${list}`,
-            mentions
+            mentions: pns
         }, { quoted: msg })
     },
 
@@ -392,12 +420,12 @@ ${metadata.desc || 'No description'}
 
         if (!admins.length) return sock.sendMessage(from, { text: '❌ No admins found!' }, { quoted: msg })
 
-        const list = admins.map(a => `👑 @${a.id.split('@')[0]} ${a.admin === 'superadmin' ? '*(Owner)*' : ''}`).join('\n')
-        const mentions = admins.map(a => a.id)
+        const adminJids = admins.map(a => a.phoneNumber || a.id)
+        const list = admins.map((a, i) => `👑 @${adminJids[i].split('@')[0]} ${a.admin === 'superadmin' ? '*(Owner)*' : ''}`).join('\n')
 
         await sock.sendMessage(from, {
             text: `👑 *Group Admins (${admins.length}):*\n\n${list}`,
-            mentions
+            mentions: adminJids
         }, { quoted: msg })
     },
 

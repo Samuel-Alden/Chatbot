@@ -9,3 +9,9 @@ tmp/
 .DS_Store
 node_modules/
 .env
+eng.traineddata
+ind.traineddata
+.agents/
+.claude/
+.codex/
+.cursor/

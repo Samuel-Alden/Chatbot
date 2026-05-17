@@ -1,5 +1,6 @@
 const db = require('../utils/db')
 const { normalizeJid } = require('../utils/helper')
+const { phoneOf, phonesOf } = require('../utils/jids')
 
 const sessions = db.load('absen')
 
@@ -39,9 +40,10 @@ module.exports = {
         const senderNum = normalizeJid(sender)
         const alreadyAttended = session.attendees.find(a => normalizeJid(a.jid) === senderNum)
 
+        const pn = await phoneOf(sock, sender, from)
         if (alreadyAttended) return sock.sendMessage(from, {
-            text: `❌ @${sender.split('@')[0]}, you have already marked your attendance!`,
-            mentions: [sender]
+            text: `❌ @${pn.split('@')[0]}, you have already marked your attendance!`,
+            mentions: [pn]
         }, { quoted: msg })
 
         const time = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
@@ -49,8 +51,8 @@ module.exports = {
         db.save('absen', sessions)
 
         await sock.sendMessage(from, {
-            text: `✅ @${sender.split('@')[0]} has marked attendance!\n⏰ Time: ${time}\n👥 Total: ${session.attendees.length}`,
-            mentions: [sender]
+            text: `✅ @${pn.split('@')[0]} has marked attendance!\n⏰ Time: ${time}\n👥 Total: ${session.attendees.length}`,
+            mentions: [pn]
         }, { quoted: msg })
     },
 
@@ -63,14 +65,14 @@ module.exports = {
             text: '📋 No one has marked attendance yet!'
         }, { quoted: msg })
 
+        const pns = await phonesOf(sock, session.attendees.map(a => a.jid), from)
         const list = session.attendees.map((a, i) =>
-            `${i + 1}. @${a.jid.split('@')[0]} — ${a.time}`
+            `${i + 1}. @${pns[i].split('@')[0]} — ${a.time}`
         ).join('\n')
-        const mentions = session.attendees.map(a => a.jid)
 
         await sock.sendMessage(from, {
             text: `📋 *ATTENDANCE LIST*\n📌 Topic: ${session.topic}\n📅 Date: ${session.date}\n👥 Total: ${session.attendees.length}\n\n${list}`,
-            mentions
+            mentions: pns
         }, { quoted: msg })
     },
 

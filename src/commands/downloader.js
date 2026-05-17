@@ -2,6 +2,7 @@ const { execFile } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const util = require('util')
+const { resolveFfmpegPath, resolveYtDlpPath } = require('../utils/systemBinaries')
 const execFilePromise = util.promisify(execFile)
 
 const tmpDir = path.join(__dirname, '../../tmp')
@@ -21,21 +22,26 @@ function isSafeUrl(url) {
 }
 
 async function downloadYoutube(url, type) {
+    const ytDlpPath = resolveYtDlpPath()
+    const ffmpegPath = resolveFfmpegPath()
+    if (!ytDlpPath) throw new Error('yt-dlp not found on PATH')
+    if (!ffmpegPath) throw new Error('ffmpeg not found on PATH')
+
     const outputPath = path.join(tmpDir, `yt_${Date.now()}`)
     const baseArgs = [
-        '--ffmpeg-location', '/usr/bin/ffmpeg',
+        '--ffmpeg-location', ffmpegPath,
         '-o', `${outputPath}.%(ext)s`
     ]
 
     if (type === 'mp3') {
-        await execFilePromise('yt-dlp', [
+        await execFilePromise(ytDlpPath, [
             '-x', '--audio-format', 'mp3', '--audio-quality', '0',
             ...baseArgs, '--', url
         ])
         return `${outputPath}.mp3`
     }
 
-    await execFilePromise('yt-dlp', [
+    await execFilePromise(ytDlpPath, [
         '-f', 'best[ext=mp4][filesize<50M]/best[ext=mp4]/best',
         ...baseArgs, '--', url
     ])
@@ -58,6 +64,18 @@ module.exports = {
         }
 
         const type = command === 'ytmp3' ? 'mp3' : 'mp4'
+        if (!resolveYtDlpPath()) {
+            await sock.sendMessage(from, {
+                text: '❌ `yt-dlp` is not installed or not on PATH. Install it before using downloader commands.'
+            }, { quoted: msg })
+            return
+        }
+        if (!resolveFfmpegPath()) {
+            await sock.sendMessage(from, {
+                text: '❌ `ffmpeg` is not installed or not on PATH. Install it before using downloader commands.'
+            }, { quoted: msg })
+            return
+        }
         await sock.sendMessage(from, { text: `⏳ Downloading YouTube ${type.toUpperCase()}, please wait...` }, { quoted: msg })
 
         let filePath = null
@@ -101,14 +119,28 @@ module.exports = {
             return
         }
 
+        if (!resolveYtDlpPath()) {
+            await sock.sendMessage(from, {
+                text: '❌ `yt-dlp` is not installed or not on PATH. Install it before using downloader commands.'
+            }, { quoted: msg })
+            return
+        }
+        if (!resolveFfmpegPath()) {
+            await sock.sendMessage(from, {
+                text: '❌ `ffmpeg` is not installed or not on PATH. Install it before using downloader commands.'
+            }, { quoted: msg })
+            return
+        }
         await sock.sendMessage(from, { text: '⏳ Downloading TikTok video, please wait...' }, { quoted: msg })
 
         let filePath = null
         try {
+            const ytDlpPath = resolveYtDlpPath()
+            const ffmpegPath = resolveFfmpegPath()
             const outputPath = path.join(tmpDir, `tt_${Date.now()}`)
-            await execFilePromise('yt-dlp', [
+            await execFilePromise(ytDlpPath, [
                 '-f', 'best[ext=mp4]/best',
-                '--ffmpeg-location', '/usr/bin/ffmpeg',
+                '--ffmpeg-location', ffmpegPath,
                 '-o', `${outputPath}.%(ext)s`,
                 '--', text.trim()
             ])

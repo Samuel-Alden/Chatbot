@@ -1,5 +1,6 @@
 const db = require('../utils/db')
 const { normalizeJid } = require('../utils/helper')
+const { phoneOf } = require('../utils/jids')
 
 const msgCount = db.load('msgcount')
 
@@ -17,9 +18,10 @@ module.exports = {
 
         const senderNum = normalizeJid(sender)
         const count = msgCount[from]?.[senderNum] || 0
+        const pn = await phoneOf(sock, sender, from)
         await sock.sendMessage(from, {
-            text: `📊 @${sender.split('@')[0]} has sent *${count} messages* in this group!`,
-            mentions: [sender]
+            text: `📊 @${pn.split('@')[0]} has sent *${count} messages* in this group!`,
+            mentions: [pn]
         }, { quoted: msg })
     },
 

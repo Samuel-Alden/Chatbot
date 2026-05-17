@@ -1,13 +1,44 @@
-const { downloadMediaMessage } = require('baileys')
 const ffmpeg = require('fluent-ffmpeg')
-const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path
 const fs = require('fs')
 const path = require('path')
+const { loadBaileys } = require('../utils/baileys')
+const { firstExistingFile, fontCandidates, resolveFfmpegPath } = require('../utils/systemBinaries')
 
-ffmpeg.setFfmpegPath(ffmpegPath)
+const ffmpegPath = resolveFfmpegPath()
+if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath)
+
+const MAX_CAPTION_CHARS = 100
+const CHARS_PER_LINE = 14
+
+// Find a font file ffmpeg's drawtext filter can use. First hit wins.
+const CAPTION_FONT = firstExistingFile(fontCandidates())
+
+function wrapCaption(text) {
+    const words = text.trim().split(/\s+/).filter(Boolean)
+    const lines = []
+    let current = ''
+    for (const word of words) {
+        const candidate = current ? `${current} ${word}` : word
+        if (candidate.length > CHARS_PER_LINE && current) {
+            lines.push(current)
+            current = word
+        } else {
+            current = candidate
+        }
+    }
+    if (current) lines.push(current)
+    return lines.join('\n')
+}
 
 module.exports = {
-    makeSticker: async ({ sock, from, msg }) => {
+    makeSticker: async ({ sock, from, msg, text }) => {
+        if (!ffmpegPath) {
+            await sock.sendMessage(from, {
+                text: '❌ `ffmpeg` is not installed or not on PATH. Install it before using sticker commands.'
+            }, { quoted: msg })
+            return
+        }
+
         const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
         const targetMsg = quoted
             ? { message: quoted, key: msg.key }
@@ -24,15 +55,27 @@ module.exports = {
             return
         }
 
+        const caption = (text || '').trim()
+        if (caption.length > MAX_CAPTION_CHARS) {
+            await sock.sendMessage(from, {
+                text: `❌ Caption too long. Keep it under ${MAX_CAPTION_CHARS} characters.`
+            }, { quoted: msg })
+            return
+        }
+
         await sock.sendMessage(from, { text: '⏳ Creating sticker...' }, { quoted: msg })
 
         const tmpDir = path.join(__dirname, '../../tmp')
         if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
-        const inputPath = path.join(tmpDir, `input_${Date.now()}.${isImage ? 'jpg' : 'mp4'}`)
-        const outputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`)
+        const stamp = Date.now()
+        const inputPath = path.join(tmpDir, `input_${stamp}.${isImage ? 'jpg' : 'mp4'}`)
+        const outputPath = path.join(tmpDir, `sticker_${stamp}.webp`)
+        const captionPath = path.join(tmpDir, `caption_${stamp}.txt`)
+        let captionFileWritten = false
 
         try {
+            const { downloadMediaMessage } = await loadBaileys()
             const buffer = await downloadMediaMessage(
                 { message: targetMsg.message, key: targetMsg.key },
                 'buffer',
@@ -42,11 +85,23 @@ module.exports = {
 
             fs.writeFileSync(inputPath, buffer)
 
+            // Force a true 512x512 frame so the caption is drawn on a square
+            // canvas and doesn't get squashed when WhatsApp displays the
+            // sticker. The picture/video itself stretches to fit.
+            const scale = isVideo ? 'scale=512:512,fps=15' : 'scale=512:512'
+
+            let vf = scale
+            if (caption) {
+                fs.writeFileSync(captionPath, wrapCaption(caption))
+                captionFileWritten = true
+                const fontPart = CAPTION_FONT ? `fontfile=${CAPTION_FONT}:` : ''
+                // White text with a thick black border so it reads on any background.
+                vf += `,drawtext=${fontPart}textfile=${captionPath}:fontsize=72:fontcolor=white:bordercolor=black:borderw=5:line_spacing=8:x=(w-text_w)/2:y=h-text_h-18`
+            }
+
             await new Promise((resolve, reject) => {
                 ffmpeg(inputPath).outputOptions([
-                    '-vf', isVideo
-                        ? 'scale=512:512:force_original_aspect_ratio=decrease,fps=15'
-                        : 'scale=512:512:force_original_aspect_ratio=decrease',
+                    '-vf', vf,
                     '-loop', '0',
                     '-preset', 'default',
                     '-an',
@@ -68,7 +123,9 @@ module.exports = {
                 text: '❌ Failed to create sticker. Make sure you replied to an image or video!'
             }, { quoted: msg })
         } finally {
-            for (const p of [inputPath, outputPath]) {
+            const cleanup = [inputPath, outputPath]
+            if (captionFileWritten) cleanup.push(captionPath)
+            for (const p of cleanup) {
                 if (fs.existsSync(p)) fs.unlinkSync(p)
             }
         }

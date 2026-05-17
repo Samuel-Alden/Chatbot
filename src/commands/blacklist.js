@@ -64,10 +64,12 @@ module.exports = {
         const bl = blacklists[from] || []
         if (!bl.length) return sock.sendMessage(from, { text: '📋 Blacklist is empty!' }, { quoted: msg })
 
-        const list = bl.map((jid, i) => `${i + 1}. @${jid.split('@')[0]}`).join('\n')
+        const { phonesOf } = require('../utils/jids')
+        const pns = await phonesOf(sock, bl, from)
+        const list = pns.map((jid, i) => `${i + 1}. @${jid.split('@')[0]}`).join('\n')
         await sock.sendMessage(from, {
             text: `🚫 *Blacklisted Users (${bl.length}):*\n\n${list}`,
-            mentions: bl
+            mentions: pns
         }, { quoted: msg })
     },
 
