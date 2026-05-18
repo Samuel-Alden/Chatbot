@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bot Dashboard</title>
+    <style>
+        :root {
+            --bg: #0e1116;
+            --panel: #161b22;
+            --border: #2a313c;
+            --text: #d8dee9;
+            --muted: #8896a6;
+            --accent: #7aa2f7;
+            --good: #9ece6a;
+            --bad: #f7768e;
+            --warn: #e0af68;
+            --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        }
+        header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        header h1 { margin: 0; font-size: 18px; }
+        header .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+        header .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+        }
+        header .dot.open { background: var(--good); }
+        header .dot.close, header .dot.connecting { background: var(--warn); }
+        nav {
+            display: flex;
+            gap: 4px;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border);
+        }
+        nav button {
+            background: transparent;
+            color: var(--muted);
+            border: 0;
+            padding: 12px 16px;
+            font: inherit;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        nav button.active {
+            color: var(--text);
+            border-bottom-color: var(--accent);
+        }
+        main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+        section.tab { display: none; }
+        section.tab.active { display: block; }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .panel h2 {
+            margin: 0 0 16px;
+            font-size: 16px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+        }
+        .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+        .stat .value { font-family: var(--mono); font-size: 16px; margin-top: 4px; word-break: break-all; }
+        label { display: block; margin-bottom: 12px; font-size: 13px; }
+        label .name { color: var(--muted); display: block; margin-bottom: 4px; }
+        input[type="text"], input[type="password"], textarea {
+            width: 100%;
+            background: #0b0e13;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font: 14px var(--mono);
+        }
+        textarea { min-height: 70px; resize: vertical; }
+        button.btn {
+            background: var(--accent);
+            color: #0e1116;
+            border: 0;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button.btn.secondary {
+            background: transparent;
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        button.btn.danger { background: var(--bad); color: #0e1116; }
+        button.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+        pre.logs {
+            background: #0b0e13;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 14px;
+            font: 12px/1.5 var(--mono);
+            white-space: pre-wrap;
+            max-height: 560px;
+            overflow-y: auto;
+            margin: 0;
+        }
+        .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 13px;
+            transform: translateY(120%);
+            transition: transform .25s ease;
+        }
+        .toast.show { transform: none; }
+        .toast.error { border-color: var(--bad); }
+        .group-card {
+            background: #0b0e13;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }
+        .group-card .name { font-weight: 600; }
+        .group-card .id { color: var(--muted); font-family: var(--mono); font-size: 11px; word-break: break-all; }
+        .toggles { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+        .toggles label {
+            display: inline-flex; gap: 6px; align-items: center;
+            background: #161b22;
+            border: 1px solid var(--border);
+            padding: 6px 10px;
+            border-radius: 4px;
+            margin: 0;
+            cursor: pointer;
+        }
+        .meta { color: var(--muted); font-size: 12px; }
+        details { margin-top: 8px; }
+        summary { cursor: pointer; color: var(--muted); font-size: 12px; user-select: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🤖 Bot Dashboard</h1>
+    <span class="status">
+        <span class="dot" id="conn-dot"></span>
+        <span id="conn-text">…</span>
+        <span class="meta" id="uptime"></span>
+    </span>
+</header>
+
+<nav>
+    <button class="active" data-tab="overview">Overview</button>
+    <button data-tab="logs">Logs</button>
+    <button data-tab="env">Settings</button>
+    <button data-tab="groups">Groups</button>
+</nav>
+
+<main>
+    <section class="tab active" data-tab="overview">
+        <div class="panel">
+            <h2>Status</h2>
+            <div class="grid" id="status-grid"></div>
+        </div>
+        <div class="panel">
+            <h2>Controls</h2>
+            <button class="btn danger" id="restart-btn">Restart bot (PM2)</button>
+            <p class="meta" style="margin-top:12px">The dashboard reloads itself a few seconds after restart.</p>
+        </div>
+    </section>
+
+    <section class="tab" data-tab="logs">
+        <div class="panel">
+            <div class="row">
+                <h2 style="margin:0">PM2 Logs</h2>
+                <div>
+                    <label style="display:inline-flex;gap:6px;align-items:center;margin:0">
+                        <input type="checkbox" id="logs-auto" checked> auto-refresh
+                    </label>
+                    <button class="btn secondary" id="logs-refresh">refresh</button>
+                </div>
+            </div>
+            <h3 style="font-size:13px;color:var(--muted);margin:0 0 6px">stdout</h3>
+            <pre class="logs" id="logs-out">loading…</pre>
+            <h3 style="font-size:13px;color:var(--muted);margin:16px 0 6px">stderr</h3>
+            <pre class="logs" id="logs-err">loading…</pre>
+        </div>
+    </section>
+
+    <section class="tab" data-tab="env">
+        <div class="panel">
+            <h2>Environment (.env)</h2>
+            <div id="env-form"></div>
+            <div class="row" style="margin-top:16px">
+                <span class="meta">Changes take effect after the bot restarts.</span>
+                <button class="btn" id="env-save">Save</button>
+            </div>
+        </div>
+    </section>
+
+    <section class="tab" data-tab="groups">
+        <div class="panel">
+            <div class="row">
+                <h2 style="margin:0">Group Settings</h2>
+                <button class="btn secondary" id="groups-refresh">reload</button>
+            </div>
+            <div id="groups-list">loading…</div>
+        </div>
+    </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = sel => document.querySelector(sel)
+const $$ = sel => [...document.querySelectorAll(sel)]
+const fmtMs = ms => {
+    if (!ms || ms < 0) return '-'
+    const s = Math.floor(ms/1000)
+    const d = Math.floor(s/86400), h = Math.floor(s/3600)%24, m = Math.floor(s/60)%60, sec = s%60
+    return [d&&`${d}d`, h&&`${h}h`, m&&`${m}m`, `${sec}s`].filter(Boolean).join(' ')
+}
+const fmtBytes = b => {
+    if (!Number.isFinite(b)) return '-'
+    if (b < 1024) return b+'B'
+    if (b < 1024**2) return (b/1024).toFixed(1)+'KB'
+    if (b < 1024**3) return (b/1024**2).toFixed(1)+'MB'
+    return (b/1024**3).toFixed(2)+'GB'
+}
+function toast(msg, isError) {
+    const el = $('#toast')
+    el.textContent = msg
+    el.classList.toggle('error', !!isError)
+    el.classList.add('show')
+    clearTimeout(el._t)
+    el._t = setTimeout(() => el.classList.remove('show'), 2500)
+}
+async function api(path, opts = {}) {
+    const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts })
+    if (!res.ok) throw new Error(`${path} ${res.status}`)
+    return res.json()
+}
+
+// Tabs
+$$('nav button').forEach(b => b.addEventListener('click', () => {
+    $$('nav button').forEach(x => x.classList.remove('active'))
+    $$('section.tab').forEach(x => x.classList.remove('active'))
+    b.classList.add('active')
+    $(`section.tab[data-tab="${b.dataset.tab}"]`).classList.add('active')
+    if (b.dataset.tab === 'logs') loadLogs()
+    if (b.dataset.tab === 'env') loadEnv()
+    if (b.dataset.tab === 'groups') loadGroups()
+}))
+
+// Status
+async function loadStatus() {
+    try {
+        const s = await api('/api/status')
+        const dot = $('#conn-dot'), txt = $('#conn-text')
+        dot.className = 'dot ' + s.connection
+        txt.textContent = s.connection
+        $('#uptime').textContent = `· up ${fmtMs(s.uptimeSeconds*1000)}`
+        $('#status-grid').innerHTML = [
+            stat('Connection', s.connection),
+            stat('Bot uptime', fmtMs(s.uptimeSeconds*1000)),
+            stat('Process memory', fmtBytes(s.memory.rss)),
+            stat('Node', s.nodeVersion),
+            stat('Platform', s.platform),
+            stat('PM2 status', s.pm2?.status || '-'),
+            stat('PM2 restarts', s.pm2?.restarts ?? '-'),
+            stat('PM2 uptime', s.pm2?.uptimeMs ? fmtMs(s.pm2.uptimeMs) : '-')
+        ].join('')
+    } catch (err) { console.error(err) }
+}
+function stat(label, value) {
+    return `<div class="stat"><div class="label">${label}</div><div class="value">${value ?? '-'}</div></div>`
+}
+
+// Logs
+let logsTimer = null
+async function loadLogs() {
+    try {
+        const { out, err } = await api('/api/logs?lines=400')
+        $('#logs-out').textContent = out || '(empty)'
+        $('#logs-err').textContent = err || '(empty)'
+        $('#logs-out').scrollTop = $('#logs-out').scrollHeight
+        $('#logs-err').scrollTop = $('#logs-err').scrollHeight
+    } catch (err) { toast('Log fetch failed', true) }
+}
+$('#logs-refresh').addEventListener('click', loadLogs)
+function logsAutoTick() {
+    clearInterval(logsTimer)
+    if ($('#logs-auto').checked && document.querySelector('.tab.active').dataset.tab === 'logs') {
+        logsTimer = setInterval(loadLogs, 4000)
+    }
+}
+$('#logs-auto').addEventListener('change', logsAutoTick)
+
+// Env
+async function loadEnv() {
+    try {
+        const env = await api('/api/env')
+        const form = $('#env-form')
+        form.innerHTML = ''
+        for (const [key, value] of Object.entries(env)) {
+            const useTextarea = key === 'AI_SYSTEM_PROMPT'
+            const inputHtml = useTextarea
+                ? `<textarea name="${key}">${escape(value)}</textarea>`
+                : `<input type="text" name="${key}" value="${escape(value)}">`
+            form.insertAdjacentHTML('beforeend', `<label><span class="name">${key}</span>${inputHtml}</label>`)
+        }
+    } catch (err) { toast('Env load failed', true) }
+}
+$('#env-save').addEventListener('click', async () => {
+    const body = {}
+    for (const el of $$('#env-form input, #env-form textarea')) body[el.name] = el.value
+    try {
+        await api('/api/env', { method: 'POST', body: JSON.stringify(body) })
+        toast('Saved. Restart to apply.')
+    } catch (err) { toast('Save failed', true) }
+})
+
+// Groups
+async function loadGroups() {
+    $('#groups-list').textContent = 'loading…'
+    try {
+        const groups = await api('/api/groups')
+        if (!groups.length) {
+            $('#groups-list').textContent = 'No groups with stored settings yet.'
+            return
+        }
+        $('#groups-list').innerHTML = groups.map(renderGroup).join('')
+        bindGroupEvents()
+    } catch (err) { toast('Groups load failed', true) }
+}
+function renderGroup(g) {
+    const s = g.settings || {}
+    const toggle = (key, label) =>
+        `<label><input type="checkbox" data-key="${key}" ${s[key] ? 'checked' : ''}> ${label}</label>`
+    const badwords = (s.badWords || []).join(', ')
+    return `
+        <div class="group-card" data-id="${g.id}">
+            <div class="row" style="margin:0">
+                <div>
+                    <div class="name">${escape(g.name)}</div>
+                    <div class="id">${escape(g.id)}</div>
+                </div>
+                <button class="btn" data-save>Save</button>
+            </div>
+            <div class="toggles">
+                ${toggle('antiLink', 'antiLink')}
+                ${toggle('antiBadWord', 'antiBadWord')}
+                ${toggle('antiBot', 'antiBot')}
+                ${toggle('antiDelete', 'antiDelete')}
+                ${toggle('welcome', 'welcome')}
+            </div>
+            <details>
+                <summary>Messages & custom bad words</summary>
+                <label style="margin-top:10px"><span class="name">welcome message</span>
+                    <textarea data-key="welcomeMessage">${escape(s.welcomeMessage || '')}</textarea>
+                </label>
+                <label><span class="name">leaving (left) message</span>
+                    <textarea data-key="leftMessage">${escape(s.leftMessage || '')}</textarea>
+                </label>
+                <label><span class="name">custom bad words (comma-separated)</span>
+                    <input type="text" data-key="badWords" value="${escape(badwords)}">
+                </label>
+            </details>
+        </div>`
+}
+function bindGroupEvents() {
+    $$('.group-card [data-save]').forEach(btn => btn.addEventListener('click', async () => {
+        const card = btn.closest('.group-card')
+        const id = card.dataset.id
+        const payload = {}
+        for (const el of card.querySelectorAll('[data-key]')) {
+            const key = el.dataset.key
+            if (el.type === 'checkbox') payload[key] = el.checked
+            else if (key === 'badWords') payload[key] = el.value.split(',').map(s => s.trim()).filter(Boolean)
+            else payload[key] = el.value
+        }
+        try {
+            await api('/api/groups/' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify(payload) })
+            toast('Saved')
+        } catch (err) { toast('Save failed', true) }
+    }))
+}
+$('#groups-refresh').addEventListener('click', loadGroups)
+
+// Restart
+$('#restart-btn').addEventListener('click', async () => {
+    if (!confirm('Restart the bot? You will be disconnected for a few seconds.')) return
+    try {
+        await api('/api/restart', { method: 'POST' })
+        toast('Restarting…')
+        setTimeout(() => location.reload(), 5000)
+    } catch (err) { toast('Restart failed', true) }
+})
+
+function escape(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]))
+}
+
+// First load + polling
+loadStatus()
+setInterval(loadStatus, 5000)
+</script>
+
+</body>
+</html>

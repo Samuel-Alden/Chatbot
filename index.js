@@ -18,6 +18,7 @@ const { loadBaileys } = require('./src/utils/baileys')
 const { findBadWords } = require('./src/utils/badwords')
 const { phoneOf, phonesOf } = require('./src/utils/jids')
 const tebaklagukpop = require('./src/commands/tebaklagukpop')
+const dashboard = require('./src/dashboard/server')
 const tebakanime = require('./src/commands/tebakanime')
 
 require('dotenv').config({ quiet: true })
@@ -254,6 +255,7 @@ async function startBot() {
 
     alarm.setSock(sock)
     reminder.setSock(sock)
+    dashboard.setSock(sock)
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update
@@ -262,6 +264,8 @@ async function startBot() {
             console.log('📱 Scan this QR code with your WhatsApp:')
             qrcode.generate(qr, { small: true })
         }
+
+        if (connection) dashboard.setConnectionState(connection)
 
         if (connection === 'close') {
             const err = lastDisconnect?.error
@@ -533,4 +537,5 @@ async function startBot() {
     })
 }
 
+dashboard.start()
 startBot()
