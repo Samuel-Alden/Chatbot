@@ -102,7 +102,12 @@ function dedupe(values) {
 }
 
 function termuxPrefix() {
-    return normalizeCandidate(process.env.PREFIX) || '/data/data/com.termux/files/usr'
+    // Termux auto-sets PREFIX to its install dir (always absolute). Ignore
+    // anything that doesn't look like a real path so a stray PREFIX=! from
+    // a misconfigured .env can't poison the font-lookup paths.
+    const value = normalizeCandidate(process.env.PREFIX)
+    if (value && path.isAbsolute(value)) return value
+    return '/data/data/com.termux/files/usr'
 }
 
 function fontCandidates() {

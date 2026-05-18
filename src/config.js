@@ -2,7 +2,9 @@ require('dotenv').config({ quiet: true })
 
 module.exports = {
     botName: process.env.BOT_NAME || 'Riwoo',
-    prefix: process.env.PREFIX || '!',
+    // Use BOT_PREFIX, not PREFIX — Termux pre-sets PREFIX to its install dir
+    // and dotenv won't override pre-existing env vars.
+    prefix: process.env.BOT_PREFIX || '!',
     ownerNumber: process.env.OWNER_NUMBER,
     groqApiKey: process.env.GROQ_API_KEY,
     aiModel: process.env.AI_MODEL || 'llama-3.3-70b-versatile',
