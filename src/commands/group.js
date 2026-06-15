@@ -43,6 +43,7 @@ async function addWarning(sock, groupId, targetJid) {
 }
 
 module.exports = {
+    getGroupSettings,
     addWarning,
 
     kick: async ({ sock, from, msg, isGroup, sender }) => {
