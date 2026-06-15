@@ -1,21 +1,51 @@
 const config = require('../config')
-const { normalizeJid } = require('../utils/helper')
+const { normalizeJid, isAdmin, isBotAdmin } = require('../utils/helper')
 const { findCommand, renderMenu, renderCommandHelp } = require('./commandRegistry')
 const economy = require('../commands/economy')
+const { getGroupSettings } = require('../commands/group')
 
 const cooldowns = new Map()
 
+/**
+ * Tracks recently seen prefixed messages for antiBot correlation.
+ * Shape: Map<msgId, { timestampS: number, groupId: string, senderJid: string }>
+ *
+ * Intentionally non-persistent — clears on restart, which is fine since
+ * the detection window is only a few seconds.
+ */
+const recentPrefixedMessages = new Map()
+
+/** Replies arriving within this many seconds of a prefixed message are flagged. */
+const BOT_REPLY_THRESHOLD_S = 2
+
+/** Discard tracked entries older than this (seconds). Memory guard only — detection
+ *  timing is the primary filter. */
+const TRACK_TTL_S = 10
+
 setInterval(() => {
-    const now = Date.now()
+    const nowMs = Date.now()
+    const nowS = Math.floor(nowMs / 1000)
+
     for (const [key, availableAt] of cooldowns) {
-        if (availableAt <= now) cooldowns.delete(key)
+        if (availableAt <= nowMs) cooldowns.delete(key)
+    }
+
+    for (const [msgId, record] of recentPrefixedMessages) {
+        if (nowS - record.timestampS > TRACK_TTL_S) recentPrefixedMessages.delete(msgId)
     }
 }, 60_000).unref()
 
 module.exports = async (sock, msg) => {
     try {
+        // AntiBot runs on every message — before prefix filtering — so it can
+        // intercept replies from JIDs that don't themselves send commands.
+        await checkAntiBot(sock, msg)
+
         const ctx = buildContext(sock, msg)
         if (!ctx) return
+
+        // Record this prefixed message so incoming replies can be timed against it.
+        trackPrefixedMessage(msg, ctx)
 
         if (ctx.command === 'menu' || ctx.command === 'help') {
             await sendHelp(ctx)
@@ -44,6 +74,91 @@ module.exports = async (sock, msg) => {
         }
     } catch (err) {
         console.error('[ERROR] messageHandler:', err)
+    }
+}
+
+/**
+ * Stores a prefixed message in the tracking map so replies to it can be
+ * correlated and timed.
+ *
+ * @param {import('@whiskeysockets/baileys').WAMessage} msg
+ * @param {{ isGroup: boolean, from: string, sender: string }} ctx
+ */
+function trackPrefixedMessage(msg, ctx) {
+    if (!ctx.isGroup) return
+
+    const msgId = msg.key.id
+    if (!msgId) return
+
+    recentPrefixedMessages.set(msgId, {
+        timestampS: Number(msg.messageTimestamp),
+        groupId: ctx.from,
+        senderJid: ctx.sender
+    })
+}
+
+/**
+ * Detects suspected bots by checking whether an incoming message is a reply
+ * to a recently tracked prefixed message and arrived within BOT_REPLY_THRESHOLD_S.
+ *
+ * Exemptions (will NOT kick):
+ *   - Non-group messages
+ *   - antiBot not enabled for the group
+ *   - Not a reply, or not a reply to a tracked prefixed message
+ *   - Reply arrived too slowly to be suspicious
+ *   - Replier is the bot itself
+ *   - Replier is the original command sender
+ *   - Replier is a group admin
+ *   - Bot is not admin (can't kick)
+ *
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {import('@whiskeysockets/baileys').WAMessage} msg
+ */
+async function checkAntiBot(sock, msg) {
+    const from = msg.key.remoteJid
+    if (!from?.endsWith('@g.us')) return
+
+    const settings = getGroupSettings(from)
+    if (!settings.antiBot) return
+
+    // Must be a reply
+    const repliedToId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId
+    if (!repliedToId) return
+
+    // Must be a reply to a prefixed message we're tracking
+    const original = recentPrefixedMessages.get(repliedToId)
+    if (!original) return
+
+    const replyTimestampS = Number(msg.messageTimestamp)
+    const elapsed = replyTimestampS - original.timestampS
+    if (elapsed >= BOT_REPLY_THRESHOLD_S) return
+
+    const replierJid = msg.key.participant
+    if (!replierJid) return
+
+    // Never flag the bot itself
+    const botJid = sock.user?.id
+    if (botJid && normalizeJid(replierJid) === normalizeJid(botJid)) return
+
+    // Never flag the person who sent the original command — a fast follow-up
+    // from the same user isn't suspicious
+    if (normalizeJid(replierJid) === normalizeJid(original.senderJid)) return
+
+    // Never flag group admins — they may run bots legitimately
+    if (await isAdmin(sock, from, replierJid)) return
+
+    // Bot must be admin to kick
+    if (!await isBotAdmin(sock, from)) return
+
+    try {
+        await sock.groupParticipantsUpdate(from, [replierJid], 'remove')
+        await sock.sendMessage(from, {
+            text: `🤖 @${replierJid.split('@')[0]} was removed — responded to a command in *${elapsed}s*, which looks like automated behaviour.`,
+            mentions: [replierJid]
+        })
+        console.log(`[ANTIBOT] Kicked suspected bot ${replierJid} in ${from} (replied in ${elapsed}s)`)
+    } catch (err) {
+        console.error('[ANTIBOT] Kick failed:', err.message)
     }
 }
 
